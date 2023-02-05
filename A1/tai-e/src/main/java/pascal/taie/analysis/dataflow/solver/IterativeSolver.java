@@ -39,6 +39,19 @@ class IterativeSolver<Node, Fact> extends Solver<Node, Fact> {
 
     @Override
     protected void doSolveBackward(CFG<Node> cfg, DataflowResult<Node, Fact> result) {
-        // TODO - finish me
+        boolean hasChange = true;
+        while (hasChange) {
+            hasChange = false;
+            for (Node node : cfg) {
+                if (cfg.isExit(node)) continue;
+                // This function should work for backward analysis in general
+                // For LiveVariableAnalysis, OUT[B] = union({IN[S] for S in B.succ()});
+                Fact outFact = result.getOutFact(node);  // NOTE: get reference, no need to set[In|Out]Fact later
+                for (Node succ : cfg.getSuccsOf(node)) {
+                    analysis.meetInto(result.getInFact(succ), outFact);
+                }
+                hasChange |= analysis.transferNode(node, result.getInFact(node), outFact);
+            }
+        }
     }
 }
