@@ -129,9 +129,15 @@ public class ConstantPropagation extends
         // https://tai-e.pascal-lab.net/pa2/exp-subclasses.png
         if (exp instanceof IntLiteral) return Value.makeConstant(((IntLiteral) exp).getValue());
         if (exp instanceof Var) return in.get((Var) exp);
-        if (exp instanceof BinaryExp) {
+        if (exp instanceof BinaryExp binExp) {
             Value v1 = in.get(((BinaryExp) exp).getOperand1());
             Value v2 = in.get(((BinaryExp) exp).getOperand2());
+            // NOTE: Div0 can happen even if operand1 is not constant!
+            if (v2.isConstant() && v2.getConstant() == 0) {
+                if (binExp.getOperator() instanceof ArithmeticExp.Op arithOp) {
+                    if (arithOp == ArithmeticExp.Op.DIV || arithOp == ArithmeticExp.Op.REM) return Value.getUndef();
+                }
+            }
             // NOTE: similar to meetValue but different when there is UNDEF
             if (v1.isNAC() || v2.isNAC()) return Value.getNAC();
             if (v1.isUndef() || v2.isUndef()) return Value.getUndef();
@@ -144,8 +150,8 @@ public class ConstantPropagation extends
                         case ADD -> Value.makeConstant(c1 + c2);
                         case SUB -> Value.makeConstant(c1 - c2);
                         case MUL -> Value.makeConstant(c1 * c2);
-                        case DIV -> c2 != 0 ? Value.makeConstant(c1 / c2) : Value.getUndef();
-                        case REM -> c2 != 0 ? Value.makeConstant(c1 % c2) : Value.getUndef();
+                        case DIV -> Value.makeConstant(c1 / c2);
+                        case REM -> Value.makeConstant(c1 % c2);
                     };  // DIV 0 and REM 0 return UNDEF
                 } else if (exp instanceof BitwiseExp) {
                     return Value.makeConstant(switch ((BitwiseExp.Op) op) {
