@@ -88,15 +88,16 @@ public class ConstantPropagation extends
     @Override
     public boolean transferNode(Stmt stmt, CPFact in, CPFact out) {
         // TODO: there might be bugs
-        out.copyFrom(in);
+        boolean hasChange = out.copyFrom(in);
         if (stmt instanceof DefinitionStmt def) {
             if(def.getLValue() instanceof Var var && canHoldInt(var)) {
                 Value genVal = evaluate(def.getRValue(), in);
                 // NOTE: shouldn't meetValue here, otherwise re-assign will cause NAC, failing testAssign
-                return out.update(var, genVal);
+                // NOTE: change can happen from both IN[s] and GEN[s]
+                hasChange |= out.update(var, genVal);
             }
         }
-        return false;
+        return hasChange;
     }
 
     /**
