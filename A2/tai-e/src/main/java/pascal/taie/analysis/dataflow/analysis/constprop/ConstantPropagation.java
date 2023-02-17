@@ -81,7 +81,8 @@ public class ConstantPropagation extends
     public Value meetValue(Value v1, Value v2) {
         if (v1.isNAC() || v2.isNAC()) return Value.getNAC();
         if (v1.isUndef() || v2.isUndef()) return v1.isUndef() ? v2 : v1;
-        return v1 == v2 ? v1 : Value.getNAC();
+        // NOTE: When comparing objects for equality, always use .equals() instead of ==
+        return v1.equals(v2) ? v1 : Value.getNAC();
     }
 
     @Override
