@@ -129,18 +129,18 @@ public class ConstantPropagation extends
         // https://tai-e.pascal-lab.net/pa2/exp-subclasses.png
         if (exp instanceof IntLiteral) return Value.makeConstant(((IntLiteral) exp).getValue());
         if (exp instanceof Var) return in.get((Var) exp);
-        Value res = Value.getNAC();  // NOTE: evaluate as NAC by default, otherwise testInterprocedural will fail
         if (exp instanceof BinaryExp) {
-            Var op1 = ((BinaryExp) exp).getOperand1();
-            Var op2 = ((BinaryExp) exp).getOperand2();
-            Value v1 = in.get(op1);
-            Value v2 = in.get(op2);
+            Value v1 = in.get(((BinaryExp) exp).getOperand1());
+            Value v2 = in.get(((BinaryExp) exp).getOperand2());
+            // NOTE: similar to meetValue but different when there is UNDEF
+            if (v1.isNAC() || v2.isNAC()) return Value.getNAC();
+            if (v1.isUndef() || v2.isUndef()) return Value.getUndef();
             if (v1.isConstant() && v2.isConstant()) {
                 int c1 = v1.getConstant();
                 int c2 = v2.getConstant();
                 BinaryExp.Op op = ((BinaryExp) exp).getOperator();
                 if (exp instanceof ArithmeticExp) {
-                    res = switch ((ArithmeticExp.Op) op) {
+                    return switch ((ArithmeticExp.Op) op) {
                         case ADD -> Value.makeConstant(c1 + c2);
                         case SUB -> Value.makeConstant(c1 - c2);
                         case MUL -> Value.makeConstant(c1 * c2);
@@ -148,13 +148,13 @@ public class ConstantPropagation extends
                         case REM -> c2 != 0 ? Value.makeConstant(c1 % c2) : Value.getUndef();
                     };  // DIV 0 and REM 0 return UNDEF
                 } else if (exp instanceof BitwiseExp) {
-                    res = Value.makeConstant(switch ((BitwiseExp.Op) op) {
+                    return Value.makeConstant(switch ((BitwiseExp.Op) op) {
                         case OR -> c1 | c2;
                         case AND -> c1 & c2;
                         case XOR -> c1 ^ c2;
                     });
                 } else if (exp instanceof ConditionExp) {
-                    res = Value.makeConstant(switch ((ConditionExp.Op) op) {
+                    return Value.makeConstant(switch ((ConditionExp.Op) op) {
                         case EQ -> c1 == c2;
                         case GE -> c1 >= c2;
                         case GT -> c1 > c2;
@@ -163,7 +163,7 @@ public class ConstantPropagation extends
                         case NE -> c1 != c2;
                     } ? 1 : 0);  // true/false -> 1/0
                 } else if (exp instanceof ShiftExp) {
-                    res = Value.makeConstant(switch ((ShiftExp.Op) op) {
+                    return Value.makeConstant(switch ((ShiftExp.Op) op) {
                         case SHL -> c1 << c2;
                         case SHR -> c1 >> c2;
                         case USHR -> c1 >>> c2;
@@ -171,6 +171,6 @@ public class ConstantPropagation extends
                 }
             }
         }
-        return res;
+        return Value.getNAC();  // NOTE: evaluate as NAC by default, otherwise testInterprocedural will fail
     }
 }
