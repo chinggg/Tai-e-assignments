@@ -88,11 +88,12 @@ public class ConstantPropagation extends
     public boolean transferNode(Stmt stmt, CPFact in, CPFact out) {
         // TODO: there might be bugs
         out.copyFrom(in);
-        if (stmt instanceof DefinitionStmt) {
-            Var var = ((DefinitionStmt<Var, ?>) stmt).getLValue();
-            Value genVal = evaluate(((DefinitionStmt<?, ?>) stmt).getRValue(), in);
-            Value oldVal = in.get(var);
-            return out.update(var, meetValue(genVal, oldVal));
+        if (stmt instanceof DefinitionStmt def) {
+            if(def.getLValue() instanceof Var var && canHoldInt(var)) {
+                Value genVal = evaluate(def.getRValue(), in);
+                // NOTE: shouldn't meetValue here, otherwise re-assign will cause NAC, failing testAssign
+                return out.update(var, genVal);
+            }
         }
         return false;
     }
@@ -126,7 +127,7 @@ public class ConstantPropagation extends
         // https://tai-e.pascal-lab.net/pa2/exp-subclasses.png
         if (exp instanceof IntLiteral) return Value.makeConstant(((IntLiteral) exp).getValue());
         if (exp instanceof Var) return in.get((Var) exp);
-        Value res = Value.getUndef();
+        Value res = Value.getNAC();  // NOTE: evaluate as NAC by default, otherwise testInterprocedural will fail
         if (exp instanceof BinaryExp) {
             Var op1 = ((BinaryExp) exp).getOperand1();
             Var op2 = ((BinaryExp) exp).getOperand2();
@@ -166,8 +167,6 @@ public class ConstantPropagation extends
                         case USHR -> c1 >>> c2;
                     });
                 }
-            } else if (v1.isNAC() || v2.isNAC()) {
-                res = Value.getNAC();
             }
         }
         return res;
