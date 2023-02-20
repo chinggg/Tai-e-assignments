@@ -46,6 +46,7 @@ import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.ir.stmt.SwitchStmt;
 
 import java.util.Comparator;
+import java.util.LinkedList;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -69,8 +70,51 @@ public class DeadCodeDetection extends MethodAnalysis {
                 ir.getResult(LiveVariableAnalysis.ID);
         // keep statements (dead code) sorted in the resulting set
         Set<Stmt> deadCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
-        // TODO - finish me
         // Your task is to recognize dead code in ir and add it to deadCode
+        Set<Stmt> liveCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
+        LinkedList<Stmt> queue = new LinkedList<>();
+        queue.add(cfg.getEntry());
+        // NOTE: BFS to traverse all stmts, tried ir.getStmts() but failed
+        while (!queue.isEmpty()) {
+            Stmt stmt = queue.poll();
+            if (liveCode.contains(stmt)) continue;  // NOTE: otherwise testLoop never ends
+            liveCode.add(stmt);
+            // NOTE: for *constant* branch statements, only add *live* successors to queue
+            if (stmt instanceof If ifStmt) {
+                Value condVal = ConstantPropagation.evaluate(ifStmt.getCondition(), constants.getResult(ifStmt));
+                if (condVal.isConstant()) {
+                    cfg.getOutEdgesOf(stmt).forEach(edge -> {
+                        Stmt succ = edge.getTarget();
+                        if ((edge.getKind() == Edge.Kind.IF_TRUE && condVal.getConstant() ==1) ||
+                                (edge.getKind() == Edge.Kind.IF_FALSE && condVal.getConstant() == 0))
+                            queue.add(succ);
+                    });
+                    continue;
+                }
+            }
+            else if (stmt instanceof SwitchStmt switchStmt) {
+                if (constants.getResult(stmt).get(switchStmt.getVar()).isConstant()) {
+                    int constant = constants.getResult(switchStmt).get(switchStmt.getVar()).getConstant();
+                    int reachIdx = switchStmt.getCaseValues().indexOf(constant);
+                    if (reachIdx >= 0) queue.add(switchStmt.getTarget(reachIdx));
+                    else queue.add(switchStmt.getDefaultTarget());
+                    continue;
+                }
+            } else if (stmt instanceof AssignStmt assignStmt) {
+                if (hasNoSideEffect(assignStmt.getRValue()) &&
+                        assignStmt.getLValue() instanceof Var var &&
+                        !liveVars.getResult(stmt).contains(var)) {
+                    deadCode.add(stmt);  // dead assignment must be specified clearly, successors still live
+                }
+            }
+            // NOTE: branch stmts have been processed independently, add normal successors to queue
+            cfg.getSuccsOf(stmt).forEach(succ -> {
+                queue.add(succ);
+            });
+        }
+        ir.getStmts().forEach(stmt -> {
+            if (!liveCode.contains(stmt)) deadCode.add(stmt);
+        });
         return deadCode;
     }
 

@@ -26,6 +26,8 @@ import pascal.taie.analysis.dataflow.analysis.DataflowAnalysis;
 import pascal.taie.analysis.dataflow.fact.DataflowResult;
 import pascal.taie.analysis.graph.cfg.CFG;
 
+import java.util.LinkedList;
+
 class WorkListSolver<Node, Fact> extends Solver<Node, Fact> {
 
     WorkListSolver(DataflowAnalysis<Node, Fact> analysis) {
@@ -34,11 +36,33 @@ class WorkListSolver<Node, Fact> extends Solver<Node, Fact> {
 
     @Override
     protected void doSolveForward(CFG<Node> cfg, DataflowResult<Node, Fact> result) {
-        // TODO - finish me
+        LinkedList<Node> workList = new LinkedList(cfg.getNodes());
+        while (!workList.isEmpty()) {
+            Node node = workList.pop();
+            if (cfg.isEntry(node)) continue;;
+            Fact inFact = result.getInFact(node);
+            for (Node pred : cfg.getPredsOf(node)) {
+                analysis.meetInto(result.getOutFact(pred), inFact);
+            }
+            if (analysis.transferNode(node, inFact, result.getOutFact(node))) {
+                workList.addAll(cfg.getSuccsOf(node));
+            }
+        }
     }
 
     @Override
     protected void doSolveBackward(CFG<Node> cfg, DataflowResult<Node, Fact> result) {
-        // TODO - finish me
+        LinkedList<Node> workList = new LinkedList(cfg.getNodes());
+        while (!workList.isEmpty()) {
+            Node node = workList.pop();
+            if (cfg.isExit(node)) continue;
+            Fact outFact = result.getOutFact(node);
+            for (Node succ : cfg.getSuccsOf(node)) {
+                analysis.meetInto(result.getInFact(succ), outFact);
+            }
+            if (analysis.transferNode(node, result.getInFact(node), outFact)) {
+                workList.addAll(cfg.getPredsOf(node));
+            }
+        }
     }
 }
