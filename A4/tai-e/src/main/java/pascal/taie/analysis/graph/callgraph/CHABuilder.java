@@ -72,12 +72,15 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
      */
     private Set<JMethod> resolve(Invoke callSite) {
         // NOTE: You are NOT allowed to use ClassHierarchyImpl.resolveMethod(MethodRef) in this assignment
+        // so use dispatch to get JMethod
         MethodRef methodRef = callSite.getMethodRef();
         Set<JMethod> res = new HashSet<>();
+        JMethod method;  // NOTE: dispatch may return null, store it and check null
         switch (CallGraphs.getCallKind(callSite)) {
             case STATIC:
             case SPECIAL:
-                res.add(dispatch(methodRef.getDeclaringClass(), methodRef.getSubsignature()));
+                method = dispatch(methodRef.getDeclaringClass(), methodRef.getSubsignature());
+                if (method != null) res.add(method);
                 break;
             case VIRTUAL:
             case INTERFACE:
@@ -85,9 +88,12 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
                 queue.add(methodRef.getDeclaringClass());
                 while (!queue.isEmpty()) {
                     JClass cls = queue.poll();
-                    JMethod method = dispatch(cls, methodRef.getSubsignature());
-                    if (method != null) res.add(method);
+                    method = dispatch(cls, methodRef.getSubsignature());
+                    // NOTE: for virtual call, abstract method should be excluded
+                    if (method != null && !method.isAbstract()) res.add(method);
                     queue.addAll(hierarchy.getDirectSubclassesOf(cls));
+                    // NOTE: include implementors to dispatch interface correctly
+                    queue.addAll(hierarchy.getDirectImplementorsOf(cls));
                 }
                 break;
         }
