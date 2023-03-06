@@ -56,33 +56,49 @@ public class ConstantPropagation extends
 
     @Override
     public CPFact newBoundaryFact(CFG<Stmt> cfg) {
-        // TODO - finish me
-        return null;
+        CPFact fact = new CPFact();
+        cfg.getIR().getParams().forEach(var -> {
+            if (canHoldInt(var)) {
+                fact.update(var, Value.getNAC());
+            }
+        });
+        return fact;
     }
 
     @Override
     public CPFact newInitialFact() {
-        // TODO - finish me
-        return null;
+        return new CPFact();
     }
 
     @Override
     public void meetInto(CPFact fact, CPFact target) {
-        // TODO - finish me
+        fact.forEach((var, value) -> {
+            target.update(var, meetValue(target.get(var), value));
+        });
     }
 
     /**
      * Meets two Values.
      */
     public Value meetValue(Value v1, Value v2) {
-        // TODO - finish me
-        return null;
+        if (v1.isNAC() || v2.isNAC()) return Value.getNAC();
+        if (v1.isUndef() || v2.isUndef()) return v1.isUndef() ? v2 : v1;
+        // NOTE: When comparing objects for equality, always use .equals() instead of ==
+        return v1.equals(v2) ? v1 : Value.getNAC();
     }
 
     @Override
     public boolean transferNode(Stmt stmt, CPFact in, CPFact out) {
-        // TODO - finish me
-        return false;
+        boolean hasChange = out.copyFrom(in);
+        if (stmt instanceof DefinitionStmt def) {
+            if(def.getLValue() instanceof Var var && canHoldInt(var)) {
+                Value genVal = evaluate(def.getRValue(), in);
+                // NOTE: shouldn't meetValue here, otherwise re-assign will cause NAC, failing testAssign
+                // NOTE: change can happen from both IN[s] and GEN[s]
+                hasChange |= out.update(var, genVal);
+            }
+        }
+        return hasChange;
     }
 
     /**
@@ -111,7 +127,57 @@ public class ConstantPropagation extends
      * @return the resulting {@link Value}
      */
     public static Value evaluate(Exp exp, CPFact in) {
-        // TODO - finish me
-        return null;
+        // https://tai-e.pascal-lab.net/pa2/exp-subclasses.png
+        if (exp instanceof IntLiteral) return Value.makeConstant(((IntLiteral) exp).getValue());
+        if (exp instanceof Var) return in.get((Var) exp);
+        if (exp instanceof BinaryExp binExp) {
+            Value v1 = in.get(((BinaryExp) exp).getOperand1());
+            Value v2 = in.get(((BinaryExp) exp).getOperand2());
+            // NOTE: Div0 can happen even if operand1 is not constant!
+            if (v2.isConstant() && v2.getConstant() == 0) {
+                if (binExp.getOperator() instanceof ArithmeticExp.Op arithOp) {
+                    if (arithOp == ArithmeticExp.Op.DIV || arithOp == ArithmeticExp.Op.REM) return Value.getUndef();
+                }
+            }
+            // NOTE: similar to meetValue but different when there is UNDEF
+            if (v1.isNAC() || v2.isNAC()) return Value.getNAC();
+            if (v1.isUndef() || v2.isUndef()) return Value.getUndef();
+            if (v1.isConstant() && v2.isConstant()) {
+                int c1 = v1.getConstant();
+                int c2 = v2.getConstant();
+                BinaryExp.Op op = ((BinaryExp) exp).getOperator();
+                if (exp instanceof ArithmeticExp) {
+                    return Value.makeConstant(switch ((ArithmeticExp.Op) op) {
+                        case ADD -> (c1 + c2);
+                        case SUB -> c1 - c2;
+                        case MUL -> c1 * c2;
+                        case DIV -> c1 / c2;
+                        case REM -> c1 % c2;
+                    });  // DIV 0 and REM already checked
+                } else if (exp instanceof BitwiseExp) {
+                    return Value.makeConstant(switch ((BitwiseExp.Op) op) {
+                        case OR -> c1 | c2;
+                        case AND -> c1 & c2;
+                        case XOR -> c1 ^ c2;
+                    });
+                } else if (exp instanceof ConditionExp) {
+                    return Value.makeConstant(switch ((ConditionExp.Op) op) {
+                        case EQ -> c1 == c2;
+                        case GE -> c1 >= c2;
+                        case GT -> c1 > c2;
+                        case LE -> c1 <= c2;
+                        case LT -> c1 < c2;
+                        case NE -> c1 != c2;
+                    } ? 1 : 0);  // true/false -> 1/0
+                } else if (exp instanceof ShiftExp) {
+                    return Value.makeConstant(switch ((ShiftExp.Op) op) {
+                        case SHL -> c1 << c2;
+                        case SHR -> c1 >> c2;
+                        case USHR -> c1 >>> c2;
+                    });
+                }
+            }
+        }
+        return Value.getNAC();  // NOTE: evaluate as NAC by default, otherwise testInterprocedural will fail
     }
 }
