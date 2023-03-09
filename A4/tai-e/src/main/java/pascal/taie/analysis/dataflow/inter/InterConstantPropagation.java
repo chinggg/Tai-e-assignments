@@ -79,7 +79,8 @@ public class InterConstantPropagation extends
 
     @Override
     protected boolean transferCallNode(Stmt stmt, CPFact in, CPFact out) {
-        return cp.transferNode(stmt, in, out);
+        // NOTE: why transferCallNode does not actually evaluate the call statement?
+        return out.copyFrom(in);
     }
 
     @Override
