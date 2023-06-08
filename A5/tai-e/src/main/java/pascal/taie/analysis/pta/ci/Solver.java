@@ -113,6 +113,7 @@ class Solver {
             }
             else if (stmt instanceof Invoke invoke && invoke.isStatic()) {
                 JMethod callee = resolveCallee(null, invoke);
+                addReachable(callee);
                 for (int i = 0; i < invoke.getInvokeExp().getArgCount(); i++) {
                     addPFGEdge(pointerFlowGraph.getVarPtr(invoke.getInvokeExp().getArg(i)), pointerFlowGraph.getVarPtr(callee.getIR().getParam(i)));
                 }
