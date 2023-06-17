@@ -100,32 +100,7 @@ class Solver {
     private void addReachable(JMethod method) {
         if (callGraph.addReachableMethod(method) == false) return;
         method.getIR().forEach(stmt -> {
-            if (stmt instanceof New newStmt) {
-                Pointer pointer = pointerFlowGraph.getVarPtr(newStmt.getLValue());
-                PointsToSet pts = new PointsToSet(new NewObj(newStmt));
-                workList.addEntry(pointer, pts);
-            }
-            else if (stmt instanceof StoreField storeField && storeField.isStatic()) {
-                addPFGEdge(pointerFlowGraph.getVarPtr(storeField.getRValue()), pointerFlowGraph.getStaticField(storeField.getFieldRef().resolve()));
-            }
-            else if (stmt instanceof LoadField loadField && loadField.isStatic()) {
-                addPFGEdge(pointerFlowGraph.getStaticField(loadField.getFieldRef().resolve()), pointerFlowGraph.getVarPtr(loadField.getLValue()));
-            }
-            else if (stmt instanceof Invoke invoke && invoke.isStatic()) {
-                JMethod callee = resolveCallee(null, invoke);
-                addReachable(callee);
-                for (int i = 0; i < invoke.getInvokeExp().getArgCount(); i++) {
-                    addPFGEdge(pointerFlowGraph.getVarPtr(invoke.getInvokeExp().getArg(i)), pointerFlowGraph.getVarPtr(callee.getIR().getParam(i)));
-                }
-                callee.getIR().getReturnVars().forEach(retvar -> {
-                    addPFGEdge(pointerFlowGraph.getVarPtr(retvar), pointerFlowGraph.getVarPtr(invoke.getLValue()));
-                });
-            }
-            else if (stmt instanceof AssignStmt assignStmt && assignStmt.getLValue() instanceof Var lVar && assignStmt.getRValue() instanceof Var rVar) {
-                VarPtr dst = pointerFlowGraph.getVarPtr(lVar);
-                VarPtr src = pointerFlowGraph.getVarPtr(rVar);
-                addPFGEdge(src, dst);
-            }
+            stmt.accept(stmtProcessor);
         });
     }
 
@@ -133,8 +108,43 @@ class Solver {
      * Processes statements in new reachable methods.
      */
     private class StmtProcessor implements StmtVisitor<Void> {
-        // TODO - if you choose to implement addReachable()
-        //  via visitor pattern, then finish me
+
+        @Override
+        public Void visit(New stmt) {
+            Pointer pointer = pointerFlowGraph.getVarPtr(stmt.getLValue());
+            // NOTE: using heapModel.getObj API seems to be more reasonable than creating new instance,
+            // though newStmt here should always create new obj instead of getting existing obj
+            PointsToSet pts = new PointsToSet(heapModel.getObj(stmt));
+            workList.addEntry(pointer, pts);
+            return null;
+        }
+
+        @Override
+        public Void visit(Copy stmt) {
+            // NOTE: use CopyStmt so no need to check AssignStmt LValue and RValue instanceof Var
+            VarPtr dst = pointerFlowGraph.getVarPtr(stmt.getLValue());
+            VarPtr src = pointerFlowGraph.getVarPtr(stmt.getRValue());
+            addPFGEdge(src, dst);
+            return StmtVisitor.super.visit(stmt);
+        }
+
+        @Override
+        public Void visit(Invoke stmt) {
+            if (stmt.isStatic()) processEachInvoke(stmt, null);
+            return null;
+        }
+
+        @Override
+        public Void visit(StoreField stmt) {
+            if (stmt.isStatic()) addPFGEdge(pointerFlowGraph.getVarPtr(stmt.getRValue()), pointerFlowGraph.getStaticField(stmt.getFieldRef().resolve()));
+            return null;
+        }
+
+        @Override
+        public Void visit(LoadField stmt) {
+            if (stmt.isStatic()) addPFGEdge(pointerFlowGraph.getStaticField(stmt.getFieldRef().resolve()), pointerFlowGraph.getVarPtr(stmt.getLValue()));
+            return null;
+        }
     }
 
     /**
@@ -190,9 +200,9 @@ class Solver {
     private PointsToSet propagate(Pointer pointer, PointsToSet pointsToSet) {
         PointsToSet diff = new PointsToSet();
         pointsToSet.forEach(obj -> {
-            if (!pointer.getPointsToSet().contains(obj)) {
+            // addObject(obj) returns true if pts did not contain obj previously
+            if (pointer.getPointsToSet().addObject(obj)) {
                 diff.addObject(obj);
-                pointer.getPointsToSet().addObject(obj);
             }
         });
         if (diff.isEmpty()) return diff;  // NOTE!: stop if no pointsToSet need to be propagated, otherwise dead loop
@@ -202,6 +212,24 @@ class Solver {
         return diff;
     }
 
+    private void processEachInvoke(Invoke invoke, Obj recv) {
+        JMethod callee = resolveCallee(recv, invoke);
+        if (recv != null) {  // NOTE: only pass receive object to *this* variable for non-static call
+            workList.addEntry(pointerFlowGraph.getVarPtr(callee.getIR().getThis()), new PointsToSet(recv));
+        }
+        // NOTE!: hasEdge API misuse actually causes failure on OJ hidden test cases
+        if (callGraph.addEdge(new Edge<>(CallGraphs.getCallKind(invoke), invoke, callee))) {
+            addReachable(callee);
+            for (int i = 0; i < invoke.getInvokeExp().getArgCount(); i++) {
+                addPFGEdge(pointerFlowGraph.getVarPtr(invoke.getInvokeExp().getArg(i)), pointerFlowGraph.getVarPtr(callee.getIR().getParam(i)));
+            }
+            if (invoke.getLValue() != null) {  // NOTE: when lValue == null, invoke ignores return value, VarPtr cannot be created
+                callee.getIR().getReturnVars().forEach(retvar -> {
+                    addPFGEdge(pointerFlowGraph.getVarPtr(retvar), pointerFlowGraph.getVarPtr(invoke.getLValue()));
+                });
+            }
+        }
+    }
     /**
      * Processes instance calls when points-to set of the receiver variable changes.
      *
@@ -210,20 +238,7 @@ class Solver {
      */
     private void processCall(Var var, Obj recv) {
         var.getInvokes().forEach(invoke -> {
-            JMethod callee = resolveCallee(recv, invoke);
-            workList.addEntry(pointerFlowGraph.getVarPtr(callee.getIR().getThis()), new PointsToSet(recv));
-            // NOTE!: hasEdge API misuse actually causes failure on OJ hidden test cases
-            if (callGraph.addEdge(new Edge<>(CallGraphs.getCallKind(invoke), invoke, callee))) {
-                addReachable(callee);
-                for (int i = 0; i < invoke.getInvokeExp().getArgCount(); i++) {
-                    addPFGEdge(pointerFlowGraph.getVarPtr(invoke.getInvokeExp().getArg(i)), pointerFlowGraph.getVarPtr(callee.getIR().getParam(i)));
-                }
-                if (invoke.getLValue() != null) {  // NOTE: when lValue == null, invoke ignores return value, VarPtr cannot be created
-                    callee.getIR().getReturnVars().forEach(retvar -> {
-                        addPFGEdge(pointerFlowGraph.getVarPtr(retvar), pointerFlowGraph.getVarPtr(invoke.getLValue()));
-                    });
-                }
-            }
+            processEachInvoke(invoke, recv);
         });
     }
 
